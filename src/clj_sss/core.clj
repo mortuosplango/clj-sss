@@ -14,25 +14,34 @@
 (def *width* 800)
 (def *height* 300)
 (def *num-rows* 8)
-(def *samples* '())
 (def *datadata* (make-array Boolean/TYPE *num-rows* 16))
 (def *datasynths* (make-array Integer/TYPE 8))
 (def *beat* (atom 0))
-(def synths '('pong 'pang))
+(def *synths* [d-sine d-saw d-tsch d-hit])
 
-
-(defsynth pong [freq 440 amp 0.5]
+(defsynth d-sine [freq 440 amp 0.5]
   (out 0
        (pan2 (* amp
-                (env-gen (perc 0.01 0.1) 1 1 0 1 :free)
+                (env-gen (perc 0.01 0.2) 1 1 0 1 :free)
                 (sin-osc freq)))))
 
-(defsynth pang [freq 440 amp 0.5]
+(defsynth d-saw [freq 440 amp 0.5]
   (out 0
        (pan2 (* amp
                 (env-gen (perc 0.01 0.1) 1 1 0 1 :free)
                 (pulse freq)))))
 
+(defsynth d-tsch [freq 440 amp 0.5]
+  (out 0
+       (pan2 (* amp
+                (env-gen (perc 0.01 0.05) 1 1 0 1 :free)
+                (gray-noise)))))
+
+(defsynth d-hit [freq 440 amp 0.5]
+  (out 0
+       (pan2 (* amp
+                (env-gen (perc 0.01 0.1) 1 1 0 1 :free)
+                (sin-osc (* freq (env-gen (perc 0.01 0.1) 1 1 0 1 :free)))))))
 
 (defn draw
   []
@@ -42,11 +51,11 @@
         (reset! *beat* beat)
         (dotimes [rownum *num-rows*]
           (if (aget *datadata* rownum beat)
-              (if (= (nth *datasynths* rownum) 1)
-                (pong (* 110 (- *num-rows* rownum)))
-                (pang (* 110 (- *num-rows* rownum))))))))
-    (background-float 0 0 0)
+            ((nth *synths* (aget *datasynths* rownum))
+             (* 110 (- *num-rows* rownum)))))))
+    (background-float 10 20 10)
     (text-font ffont)
+    (fill-float 60 125 60)
     (dotimes [rownum *num-rows*]
       (let [y-pos (+ (* rownum *padding*) *top-padding*)]
         (string->text (str "synth " (aget *datasynths* rownum))
@@ -77,7 +86,7 @@
           (aset *datadata* rownum index
                 (not (aget *datadata* rownum index)))
           (aset *datasynths* rownum
-                (if (= 1 (aget *datasynths* rownum)) 0 1 )))))))
+                (mod (+ 1 (aget *datasynths* rownum)) 4)))))))
 
 
 (defapplet clj-sss :title "clj-sss"
