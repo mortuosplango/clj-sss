@@ -7,41 +7,60 @@
                                  cos ceil)])
   (:gen-class))
 
-(def *ffont* nil)
 
-(def *beat-spacing* 30)
+;;; size of beats and padding to window border in px
+(def *beat-spacing* 30) 
 (def *window-padding* 30)
 
+;;; Parameters of the sequencer
 (def *num-tracks* 8)
-(def *num-beats* 16)
+(def *num-beats* 16)                    ; beats per track
+(def *metro* (metronome 260))           ; beats per minute
+
+(def *ffont* nil)
 (def *tracks* (atom []))
 
+(def *synths* [
+               (defsynth d-sine [freq 440 amp 0.1 sustain 0.8]
+                 (out 0
+                      (pan2 (* amp
+                               0.5
+                               (env-gen (perc 0.01 sustain 1 -16)
+                                        1 1 0 1 :free)
+                               (f-sin-osc [freq (* freq 1.02)]))
+                            (- (* 2 (/ (cpsmidi freq) 127.0)) 1))))
 
-(defsynth d-sine [freq 440 amp 0.1 sustain 0.8]
-  (out 0
-       (pan2 (* amp
-                0.5
-                (env-gen (perc 0.01 sustain 1 -16) 1 1 0 1 :free)
-                (f-sin-osc [freq (* freq 1.02)]))
-             (- (* 2 (/ (cpsmidi freq) 127.0)) 1))))
+               (defsynth d-sub [freq 440 amp 0.1]
+                 (let [env (env-gen (perc 0.01 0.5 1 -4) 1 1 0 1 :free)]
+                   (out 0
+                        (pan2 (* amp
+                                 env
+                                 0.5
+                                 (rlpf (white-noise)
+                                      [freq (* freq 1.01)]
+                                      [0.05 0.04]))))))
+               
+               (defsynth d-tsch [freq 440 amp 0.1]
+                 (let [env (env-gen (perc 0.01 0.4 1 -8) 1 1 0 1 :free)]
+                   (out 0
+                        (pan2 (* amp
+                                 env
+                                 (rhpf (white-noise)
+                                       (* (+ 1 env)
+                                          (* freq 2)) 0.4))))))
+               
+               (defsynth d-hit [freq 440 amp 0.1]
+                 (out 0
+                      (pan2 (* amp
+                               (env-gen (perc 0.01 0.1)
+                                        1 1 0 1 :free)
+                               (sin-osc (* freq
+                                           (env-gen
+                                            (perc 0.01 0.1)
+                                            1 1 0 1 :free)))))))])
 
-(defsynth d-tsch [freq 440 amp 0.1]
-  (let [env (env-gen (perc 0.01 0.4 1 -8) 1 1 0 1 :free)]
-    (out 0
-         (pan2 (* amp
-                  env
-                  (rhpf (white-noise) (* (+ 1 env) (* freq 2)) 0.4))))))
 
-(defsynth d-hit [freq 440 amp 0.1]
-  (out 0
-       (pan2 (* amp
-                (env-gen (perc 0.01 0.1) 1 1 0 1 :free)
-                (sin-osc (* freq (env-gen (perc 0.01 0.1) 1 1 0 1 :free)))))))
-
-(def metro (metronome 260))
-(def *synths* [d-sine d-tsch d-hit])
-
-
+;;; representation of a track
 (defprotocol Display
   (display [this]))
 
@@ -52,16 +71,17 @@
   Display
   (display [this]
            (let [y-pos (+ (* index *beat-spacing*) *window-padding*)]
-             (string->text (str "synth " @synth)
-                           (+ (* 17 *beat-spacing*) *window-padding*)
+             (string->text (str "synth: " (:name (meta (nth *synths* @synth))))
+                           (+ (* (inc *num-beats*)
+                                 *beat-spacing*) *window-padding*)
                            (+ y-pos 10))
              (doseq [i (range *num-beats*)]
                (if (= @beat i)
                  (stroke-float 125 255 125)
                  (stroke-float (if (= (mod index 2) 1) 55 125)))
                (if (nth @data i)
-                 (stroke-weight 25)
-                 (stroke-weight 15))
+                 (stroke-weight (* *beat-spacing* 0.8))
+                 (stroke-weight (* *beat-spacing* 0.4)))
                (point (+ (* i *beat-spacing*) *window-padding*)
                       y-pos))))
   Play
@@ -71,16 +91,18 @@
            (* 110 (- *num-tracks* index))))))
 
 
+;;; sequencing loop
 (defn player [beat]
-  (at (metro beat)
+  (at (*metro* beat)
       (doseq [track @*tracks*]
         (play track beat)))
-  (apply-at #'player (metro (inc beat)) (inc beat)))
+  (apply-at #'player (*metro* (inc beat)) (inc beat)))
 
 
+;;; draw loop
 (defn draw
   []
-  (let [beat (mod (- (metro) 1) *num-beats*)]
+  (let [beat (mod (- (*metro*) 1) *num-beats*)]
     (background-float 20)
     (text-font *ffont*)
     (fill-float 80 125 80)
@@ -90,26 +112,26 @@
 
 (defn setup []
   (def *ffont* (load-font "ArialNarrow-32.vlw"))
-  (reset! *tracks*  [])
-  (let [empty-track (apply vector
-                           (take *num-beats*
-                                 (repeatedly #(not true))))] ;; wtf...
+  (smooth)
+  (no-stroke)  
+
+  (reset! *tracks* [])
+  (let [empty-track (apply vector (repeat *num-beats* false))]
     (dotimes [i *num-tracks*]
       (swap! *tracks* conj (Track. i (atom empty-track) (atom 0) (atom 0)))))
-  (player (metro))
-  (smooth)
-  (no-stroke))
+  
+  (player (*metro*)))
+
 
 (defn mouse-pressed [evt]
-  (let [ index (int
-                (/ (- (+ (float (.getX evt))
-                         (/ *beat-spacing* 2.0))
-                      *window-padding*) *beat-spacing*))
-        tracknum (int
-                  (/ (- (+ (float (.getY evt))
-                           (/ *beat-spacing* 2.0))
-                        *window-padding*) *beat-spacing*))]
-    (if (< tracknum *num-tracks*)
+  (let [where? (fn [val] (int
+                          (/ (- (+ (float val)
+                                   (/ *beat-spacing* 2.0))
+                                *window-padding*)
+                             *beat-spacing*)))
+        index (where? (.getX evt))
+        tracknum (where? (.getY evt))]
+    (when (< tracknum *num-tracks*)
       (if (< index *num-beats*)
         (swap! (.data (nth @*tracks* tracknum))
                #(assoc %1 index (not (nth %1 index)) ))
@@ -120,7 +142,7 @@
 
 
 (defapplet clj-sss :title "clj-sss"
-  :size [(+ (* 2 *window-padding*) (* *beat-spacing* (+ *num-beats* 4)))
+  :size [(+ (* 2 *window-padding*) (* *beat-spacing* (+ *num-beats* 6)))
          (+ (* *beat-spacing* *num-tracks*) (* 2 *window-padding*))]
   :setup setup
   :draw draw
@@ -130,8 +152,6 @@
 (defn -main [& args]
   (run clj-sss))
 
-;; (run clj-sss)
+;;(run clj-sss)
 
 ;; (stop clj-sss) 
-
-
